@@ -5,7 +5,7 @@ Edit the ASSUMPTIONS block, then run:
     python vm_upgrade_cost_model.py            # prints markdown tables
     python vm_upgrade_cost_model.py --csv out  # also writes out.csv
 
-Cost formula per server type and scenario (low / mid / high):
+Cost formula per server type and scenario (mid / high):
 
     acus = server_count * sessions_per_server * acus_per_session * retry_overhead
     usd  = acus * price_per_acu
@@ -24,56 +24,54 @@ from dataclasses import dataclass
 # ASSUMPTIONS (tune here)
 # --------------------------------------------------------------------------- #
 
-SCENARIOS = ("low", "mid", "high")
+SCENARIOS = ("mid", "high")
 
-# Price per ACU in USD. Standard Enterprise list, analytics default, Dedicated Enterprise list.
+# Price per ACU in USD used for cost projections.
 PRICE_PER_ACU = {
-    "standard_1.25": 1.25,
-    "analytics_default_2.00": 2.00,
-    "dedicated_2.50": 2.50,
+    "projection_1.667": 1.667,
 }
 
 # Multiplier for failed / re-run sessions (1.20 = 20% of session spend is retries).
-RETRY_OVERHEAD = {"low": 1.10, "mid": 1.20, "high": 1.35}
+RETRY_OVERHEAD = {"mid": 1.20, "high": 1.35}
 
 
 @dataclass(frozen=True)
 class Tier:
     name: str
-    sessions_per_server: tuple[float, float, float]  # low, mid, high
-    acus_per_session: tuple[float, float, float]  # low, mid, high
-    review_hours_per_server: tuple[float, float, float]  # human effort, not billed in ACUs
+    sessions_per_server: tuple[float, float]  # mid, high
+    acus_per_session: tuple[float, float]  # mid, high
+    review_hours_per_server: tuple[float, float]  # human effort, not billed in ACUs
     size_label: str  # dim_sessions size tier the mid ACU value sits in
 
 
 TIERS = {
     "os": Tier(
         name="OS upgrade",
-        sessions_per_server=(0.5, 1.0, 2.0),
-        acus_per_session=(4, 8, 15),
-        review_hours_per_server=(0.25, 0.5, 1.0),
-        size_label="S-M",
+        sessions_per_server=(1.0, 2.0),
+        acus_per_session=(16, 30),
+        review_hours_per_server=(0.5, 1.0),
+        size_label="M-L",
     ),
     "middleware": Tier(
         name="App server / middleware",
-        sessions_per_server=(1.0, 2.0, 3.0),
-        acus_per_session=(8, 15, 25),
-        review_hours_per_server=(0.5, 1.0, 2.0),
-        size_label="M-L",
+        sessions_per_server=(2.0, 3.0),
+        acus_per_session=(30, 50),
+        review_hours_per_server=(1.0, 2.0),
+        size_label="L-XL",
     ),
     "database": Tier(
         name="Database",
-        sessions_per_server=(2.0, 3.0, 5.0),
-        acus_per_session=(15, 25, 40),
-        review_hours_per_server=(1.0, 2.0, 4.0),
-        size_label="L",
+        sessions_per_server=(3.0, 5.0),
+        acus_per_session=(50, 80),
+        review_hours_per_server=(2.0, 4.0),
+        size_label="XL",
     ),
     "pega": Tier(
         name="Pega platform",
-        sessions_per_server=(2.0, 4.0, 6.0),
-        acus_per_session=(15, 30, 50),
-        review_hours_per_server=(1.0, 2.0, 4.0),
-        size_label="L-XL",
+        sessions_per_server=(4.0, 6.0),
+        acus_per_session=(60, 100),
+        review_hours_per_server=(2.0, 4.0),
+        size_label="XL",
     ),
 }
 
@@ -155,7 +153,7 @@ def print_markdown(rows: list[Row]) -> None:
         print(f"WARNING: inventory sums to {total}, expected {EXPECTED_TOTAL}", file=sys.stderr)
 
     print("### Assumptions per tier\n")
-    print("| Tier | Sessions/server (L/M/H) | ACUs/session (L/M/H) | dim_sessions size | Review hrs/server (L/M/H) |")
+    print("| Tier | Sessions/server (M/H) | ACUs/session (M/H) | dim_sessions size | Review hrs/server (M/H) |")
     print("|---|---|---|---|---|")
     for t in TIERS.values():
         print(
@@ -163,37 +161,37 @@ def print_markdown(rows: list[Row]) -> None:
             f"{' / '.join(str(x) for x in t.acus_per_session)} | {t.size_label} | "
             f"{' / '.join(str(x) for x in t.review_hours_per_server)} |"
         )
-    print(f"\nRetry overhead multiplier: {RETRY_OVERHEAD['low']} / {RETRY_OVERHEAD['mid']} / {RETRY_OVERHEAD['high']}\n")
+    print(f"\nRetry overhead multiplier: {RETRY_OVERHEAD['mid']} / {RETRY_OVERHEAD['high']}\n")
 
     for price_key, price in PRICE_PER_ACU.items():
-        print(f"### Cost by server type at ${price:.2f}/ACU ({price_key})\n")
-        print("| Server type | Tier | Servers | ACUs low | ACUs mid | ACUs high | USD low | USD mid | USD high | % of mid ACUs |")
-        print("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        print(f"### Cost by server type at ${price:.3f}/ACU ({price_key})\n")
+        print("| Server type | Tier | Servers | ACUs mid | ACUs high | USD mid | USD high | % of mid ACUs |")
+        print("|---|---|---:|---:|---:|---:|---:|---:|")
         grand = subtotal(rows)
         for tier_key, tier in TIERS.items():
             tier_rows = [r for r in rows if r.tier == tier_key]
             for r in tier_rows:
                 print(
-                    f"| {r.server_type} | {tier.name} | {r.count:,} | {fmt_int(r.acus['low'])} | {fmt_int(r.acus['mid'])} | "
-                    f"{fmt_int(r.acus['high'])} | {fmt_usd(r.usd('low', price))} | {fmt_usd(r.usd('mid', price))} | "
+                    f"| {r.server_type} | {tier.name} | {r.count:,} | {fmt_int(r.acus['mid'])} | "
+                    f"{fmt_int(r.acus['high'])} | {fmt_usd(r.usd('mid', price))} | "
                     f"{fmt_usd(r.usd('high', price))} | {r.acus['mid'] / grand.acus['mid']:.1%} |"
                 )
             st = subtotal(tier_rows)
             print(
-                f"| **Subtotal: {tier.name}** | | **{st.count:,}** | **{fmt_int(st.acus['low'])}** | **{fmt_int(st.acus['mid'])}** | "
-                f"**{fmt_int(st.acus['high'])}** | **{fmt_usd(st.usd('low', price))}** | **{fmt_usd(st.usd('mid', price))}** | "
+                f"| **Subtotal: {tier.name}** | | **{st.count:,}** | **{fmt_int(st.acus['mid'])}** | "
+                f"**{fmt_int(st.acus['high'])}** | **{fmt_usd(st.usd('mid', price))}** | "
                 f"**{fmt_usd(st.usd('high', price))}** | **{st.acus['mid'] / grand.acus['mid']:.1%}** |"
             )
         print(
-            f"| **Grand total** | | **{grand.count:,}** | **{fmt_int(grand.acus['low'])}** | **{fmt_int(grand.acus['mid'])}** | "
-            f"**{fmt_int(grand.acus['high'])}** | **{fmt_usd(grand.usd('low', price))}** | **{fmt_usd(grand.usd('mid', price))}** | "
+            f"| **Grand total** | | **{grand.count:,}** | **{fmt_int(grand.acus['mid'])}** | "
+            f"**{fmt_int(grand.acus['high'])}** | **{fmt_usd(grand.usd('mid', price))}** | "
             f"**{fmt_usd(grand.usd('high', price))}** | 100% |"
         )
         print()
 
     grand = subtotal(rows)
-    print("### Grand total, price sensitivity\n")
-    print("| Scenario | ACUs | " + " | ".join(f"USD @ ${p:.2f}" for p in PRICE_PER_ACU.values()) + " | Human review hours |")
+    print("### Grand total\n")
+    print("| Scenario | ACUs | " + " | ".join(f"USD @ ${p:.3f}" for p in PRICE_PER_ACU.values()) + " | Human review hours |")
     print("|---|---:|" + "---:|" * len(PRICE_PER_ACU) + "---:|")
     for s in SCENARIOS:
         print(
@@ -205,7 +203,7 @@ def print_markdown(rows: list[Row]) -> None:
 
     print("### Efficiency metrics (mid scenario)\n")
     mid_sessions = sum(
-        r.count * TIERS[r.tier].sessions_per_server[1] * RETRY_OVERHEAD["mid"] for r in rows
+        r.count * TIERS[r.tier].sessions_per_server[SCENARIOS.index("mid")] * RETRY_OVERHEAD["mid"] for r in rows
     )
     print(f"- Sessions (incl. retries): {fmt_int(mid_sessions)}")
     print(f"- ACUs per server: {grand.acus['mid'] / grand.count:.1f}")
@@ -225,7 +223,7 @@ def write_csv(rows: list[Row], path: str) -> None:
                 f"acus_{s}",
                 f"review_hours_{s}",
             ]
-            header += [f"usd_{s}_at_{p:.2f}" for p in PRICE_PER_ACU.values()]
+            header += [f"usd_{s}_at_{p:.3f}" for p in PRICE_PER_ACU.values()]
         w.writerow(header)
 
         def emit(r: Row, label: str | None = None, tier_label: str | None = None) -> None:
