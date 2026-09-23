@@ -23,6 +23,9 @@ Each example includes:
 sap-migration-demo/
 ├── README.md                           ← You are here
 ├── migration-playbook.md               ← Reusable migration playbook template
+├── pre-migration-checklist.md          ← Expanded pre-migration prerequisites
+├── businessobjects-powerbi-playbook.md ← BusinessObjects → Power BI playbook
+├── businessobjects-powerbi-checklist.md ← Expanded BO → Power BI prerequisites
 ├── requirements.txt                    ← Python dependencies
 │
 ├── abap_source/                        ← Original ABAP programs
@@ -123,6 +126,11 @@ See [`migration-playbook.md`](migration-playbook.md) for the reusable playbook t
 - **Quality checklist** — definition of "done" for each migrated object
 
 This playbook is what Devin executes at scale. Define it once, run it across hundreds of objects in parallel.
+
+The same structure applies to reporting content: see
+[`businessobjects-powerbi-playbook.md`](businessobjects-powerbi-playbook.md) (with its companion
+[`businessobjects-powerbi-checklist.md`](businessobjects-powerbi-checklist.md)) for migrating SAP
+BusinessObjects universes, Webi reports, and Crystal Reports to Power BI.
 
 ---
 
