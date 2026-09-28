@@ -1,4 +1,4 @@
-# S/4HANA Migration Plan — Acme Retail Corp (ECC 6.0 → S/4HANA)
+# S/4HANA Migration Plan: Acme Retail Corp (ECC 6.0 → S/4HANA)
 
 > Phased plan for converting the legacy ECC 6.0 system to SAP S/4HANA, grounded in the custom objects
 > in [`abap_source/`](abap_source/) and the rewrite pattern already established in
@@ -18,9 +18,9 @@ and whatever ABAP stays behind is fixed to pass ATC.
 
 | Object | Object type | Integration pattern | Key S/4HANA compatibility issues | Disposition | Python service / tests |
 |---|---|---|---|---|---|
-| `Z_INVENTORY_REPORT` ([`z_inventory_report.abap`](abap_source/z_inventory_report.abap)) — created 2009, last transport `DEVK900412` | Executable report (`REPORT`) | ALV report (`CL_SALV_TABLE`, selection screen `S_WERKS/S_LGORT/S_MATKL/S_MTART`, `P_STALE`) | • Reads `MARD-LABST/INSME/SPEME` directly (`FORM fetch_inventory_data`, L79–101). In S/4 these are no longer stored in MARD; they are computed from `MATDOC` through the compatibility view (MM-IM data model simplification item).<br>• Last-GR lookup joins `MSEG`⋈`MKPF` (`BWART='101'`, L126–131). Both tables are replaced by `MATDOC`, and the compatibility views make this aggregation slow.<br>• `MATNR` is extended to 40 characters (material number field length extension), which affects `ty_inventory` and `lt_matnr`.<br>• Stock value is a placeholder (`total_stock * 10`, L185) and does not read `MBEW`/ACDOCA valuation.<br>• ALV GUI output is not Fiori/ABAP Cloud–released (`CL_SALV_*`). | **Rewrite-externally** (Pattern A: ALV→FastAPI). The ECC copy is ATC-remediated only far enough to run during the parallel run, then **retired**. | [`python_target/inventory_report/`](python_target/inventory_report/) (`calculate_stock_status`, `filter_by_status`, `generate_inventory_report`) / [`tests/test_inventory_report.py`](tests/test_inventory_report.py) (17 tests) |
-| `Z_RFC_VENDOR_LOOKUP` ([`z_rfc_vendor_lookup.abap`](abap_source/z_rfc_vendor_lookup.abap)) — created 2011, last transport `DEVK901055` | RFC-enabled function module | RFC (called by the procurement portal and EDI middleware) | • Reads vendor master `LFA1`/`LFB1` (L91–108). In S/4 the vendor is a **Business Partner** kept in sync through CVI, so `LFA1` is only valid if CVI mapping exists, and XK0x maintenance is gone.<br>• Authorization uses `F_LFA1_BUK` (L77). Under BP maintenance, BP authorization objects (`B_BUPA_*`) also apply, so the auth concept needs review.<br>• Exported types `ZS_VENDOR_DETAIL` / `ZTT_PO_HISTORY` (L20–21) are DDIC objects **that are not in the repo** and must be extracted.<br>• Uses classic `EXCEPTIONS` plus return codes; RFC is not a released/Clean Core interface.<br>• `EKKO`/`EKPO` PO history (L131+) is still valid, but `MATNR` is now 40 characters. | **Rewrite-externally** (Pattern B: RFC→REST), with the data source repointed to released S/4 APIs (BP + purchase order). The RFC is **retired** after consumers are repointed. | [`python_target/vendor_lookup/`](python_target/vendor_lookup/) (`lookup_vendor`, `calculate_po_aggregates`) / [`tests/test_vendor_lookup.py`](tests/test_vendor_lookup.py) (9 tests) |
-| `Z_IDOC_ORDER_SYNC` ([`z_idoc_order_sync.abap`](abap_source/z_idoc_order_sync.abap)) — created 2013, last transport `DEVK901388` | Function module (IDoc inbound process code) | IDoc (`ORDERS05` inbound, `MESTYP='ORDERS'`, status `64`→`51/53`) | • Classic `TABLES` parameters (`IDOC_CONTRL/IDOC_DATA/IDOC_STATUS`, L20–24; BAPI call L212–223) are obsolete and not permitted in ABAP Cloud.<br>• `ORDERS05` still runs on S/4, but it is a legacy EDI interface rather than the strategic API/event path.<br>• Partner numbers in `E1EDKA1` (`AG/WE/RE/RG`, `FORM parse_partner_segment` L297–323) must resolve to **customer BPs** after CVI.<br>• `MATNR` 40-character extension affects `E1EDP19` material mapping (L348+).<br>• `ty_order_header-doc_type` is typed as `bsad-auart` (L29). `BSAD` is an FI index table that becomes a compatibility view in S/4, so retype it to data element `AUART`.<br>• Creates orders via `BAPI_SALESORDER_CREATEFROMDAT2`. It still exists but is not released for Clean Core. | **Rewrite-externally** (Pattern C: IDoc→event-driven) calling the released S/4 Sales Order API. **Fallback:** remediate-in-S/4 (retype, BP-aware partner mapping) for trading partners that cannot leave `ORDERS05` before go-live. | [`python_target/order_sync/`](python_target/order_sync/) (`parse_idoc_to_order`, `validate_order`, `process_single_order`, `process_order_batch`) / [`tests/test_order_sync.py`](tests/test_order_sync.py) (15 tests) |
+| `Z_INVENTORY_REPORT` ([`z_inventory_report.abap`](abap_source/z_inventory_report.abap)): created 2009, last transport `DEVK900412` | Executable report (`REPORT`) | ALV report (`CL_SALV_TABLE`, selection screen `S_WERKS/S_LGORT/S_MATKL/S_MTART`, `P_STALE`) | • Reads `MARD-LABST/INSME/SPEME` directly (`FORM fetch_inventory_data`, L79–101). In S/4 these are no longer stored in MARD; they are computed from `MATDOC` through the compatibility view (MM-IM data model simplification item).<br>• Last-GR lookup joins `MSEG`⋈`MKPF` (`BWART='101'`, L126–131). Both tables are replaced by `MATDOC`, and the compatibility views make this aggregation slow.<br>• `MATNR` is extended to 40 characters (material number field length extension), which affects `ty_inventory` and `lt_matnr`.<br>• Stock value is a placeholder (`total_stock * 10`, L185) and does not read `MBEW`/ACDOCA valuation.<br>• ALV GUI output is not Fiori/ABAP Cloud–released (`CL_SALV_*`). | **Rewrite-externally** (Pattern A: ALV→FastAPI). The ECC copy is ATC-remediated only far enough to run during the parallel run, then **retired**. | [`python_target/inventory_report/`](python_target/inventory_report/) (`calculate_stock_status`, `filter_by_status`, `generate_inventory_report`) / [`tests/test_inventory_report.py`](tests/test_inventory_report.py) (17 tests) |
+| `Z_RFC_VENDOR_LOOKUP` ([`z_rfc_vendor_lookup.abap`](abap_source/z_rfc_vendor_lookup.abap)): created 2011, last transport `DEVK901055` | RFC-enabled function module | RFC (called by the procurement portal and EDI middleware) | • Reads vendor master `LFA1`/`LFB1` (L91–108). In S/4 the vendor is a **Business Partner** kept in sync through CVI, so `LFA1` is only valid if CVI mapping exists, and XK0x maintenance is gone.<br>• Authorization uses `F_LFA1_BUK` (L77). Under BP maintenance, BP authorization objects (`B_BUPA_*`) also apply, so the auth concept needs review.<br>• Exported types `ZS_VENDOR_DETAIL` / `ZTT_PO_HISTORY` (L20–21) are DDIC objects **that are not in the repo** and must be extracted.<br>• Uses classic `EXCEPTIONS` plus return codes; RFC is not a released/Clean Core interface.<br>• `EKKO`/`EKPO` PO history (L131+) is still valid, but `MATNR` is now 40 characters. | **Rewrite-externally** (Pattern B: RFC→REST), with the data source repointed to released S/4 APIs (BP + purchase order). The RFC is **retired** after consumers are repointed. | [`python_target/vendor_lookup/`](python_target/vendor_lookup/) (`lookup_vendor`, `calculate_po_aggregates`) / [`tests/test_vendor_lookup.py`](tests/test_vendor_lookup.py) (9 tests) |
+| `Z_IDOC_ORDER_SYNC` ([`z_idoc_order_sync.abap`](abap_source/z_idoc_order_sync.abap)): created 2013, last transport `DEVK901388` | Function module (IDoc inbound process code) | IDoc (`ORDERS05` inbound, `MESTYP='ORDERS'`, status `64`→`51/53`) | • Classic `TABLES` parameters (`IDOC_CONTRL/IDOC_DATA/IDOC_STATUS`, L20–24; BAPI call L212–223) are obsolete and not permitted in ABAP Cloud.<br>• `ORDERS05` still runs on S/4, but it is a legacy EDI interface rather than the strategic API/event path.<br>• Partner numbers in `E1EDKA1` (`AG/WE/RE/RG`, `FORM parse_partner_segment` L297–323) must resolve to **customer BPs** after CVI.<br>• `MATNR` 40-character extension affects `E1EDP19` material mapping (L348+).<br>• `ty_order_header-doc_type` is typed as `bsad-auart` (L29). `BSAD` is an FI index table that becomes a compatibility view in S/4, so retype it to data element `AUART`.<br>• Creates orders via `BAPI_SALESORDER_CREATEFROMDAT2`. It still exists but is not released for Clean Core. | **Rewrite-externally** (Pattern C: IDoc→event-driven) calling the released S/4 Sales Order API. **Fallback:** remediate-in-S/4 (retype, BP-aware partner mapping) for trading partners that cannot leave `ORDERS05` before go-live. | [`python_target/order_sync/`](python_target/order_sync/) (`parse_idoc_to_order`, `validate_order`, `process_single_order`, `process_order_batch`) / [`tests/test_order_sync.py`](tests/test_order_sync.py) (15 tests) |
 
 ### 1.2 Observed gaps in the existing rewrite (must close before cutover)
 
@@ -36,7 +36,7 @@ and whatever ABAP stays behind is fixed to pass ATC.
 
 ## 2. Phased Roadmap
 
-### Phase 0 — Assessment & Readiness
+### Phase 0: Assessment & Readiness
 
 | Activity | Output | Repo grounding |
 |---|---|---|
@@ -49,7 +49,7 @@ and whatever ABAP stays behind is fixed to pass ATC.
 
 **Exit criteria:** every object has a disposition (§1.1), CVI plan approved, simplification items have owners.
 
-### Phase 1 — Target Architecture & Sandbox
+### Phase 1: Target Architecture & Sandbox
 
 | Decision / activity | Options → recommendation | Repo grounding |
 |---|---|---|
@@ -61,7 +61,7 @@ and whatever ABAP stays behind is fixed to pass ATC.
 
 **Exit criteria:** architecture approved, sandbox converted, API contracts agreed for inventory, vendor/PO and sales order.
 
-### Phase 2 — Custom Code Remediation & Rewrite
+### Phase 2: Custom Code Remediation & Rewrite
 
 | Workstream | Scope | Pattern | Proof of equivalence |
 |---|---|---|---|
@@ -69,14 +69,14 @@ and whatever ABAP stays behind is fixed to pass ATC.
 | ALV → FastAPI | `Z_INVENTORY_REPORT` → `inventory_report` | Pattern A | [`tests/test_inventory_report.py`](tests/test_inventory_report.py): thresholds, stale override, status filter |
 | RFC → REST | `Z_RFC_VENDOR_LOOKUP` → `vendor_lookup` | Pattern B | [`tests/test_vendor_lookup.py`](tests/test_vendor_lookup.py): aggregates, date filter, `UP TO n ROWS`, not-found |
 | IDoc → event-driven | `Z_IDOC_ORDER_SYNC` → `order_sync` | Pattern C | [`tests/test_order_sync.py`](tests/test_order_sync.py): 5 segment types, validation rules, batch results |
-| Close the §1.2 gaps | FastAPI routers, S/4 API adapters, auth middleware, real order creation | — | New adapter tests follow the `test_<function>_<scenario>` convention ([`migration-playbook.md`](migration-playbook.md) Step 5) |
+| Close the §1.2 gaps | FastAPI routers, S/4 API adapters, auth middleware, real order creation | n/a | New adapter tests follow the `test_<function>_<scenario>` convention ([`migration-playbook.md`](migration-playbook.md) Step 5) |
 | Scale to the remaining inventory | Every other Z-object that survives Phase 0 | Same playbook, run in parallel | One `tests/test_<object>.py` per object; playbook Quality Checklist |
 
 **Rule (from the playbook):** no logic "improvements" during rewrite. Changes to logic (e.g., real valuation instead of `* 10`) go into a separate post-validation change.
 
 **Exit criteria:** `pytest tests/ -v` green, with S/4 sandbox data added as test fixtures, and ATC clean for retained ABAP.
 
-### Phase 3 — Technical Conversion
+### Phase 3: Technical Conversion
 
 | Step | Detail | Dependency |
 |---|---|---|
@@ -87,7 +87,7 @@ and whatever ABAP stays behind is fixed to pass ATC.
 | Custom code adaptation (SPDD/SPAU, post-conversion ATC) | Retained ABAP only | Phase 2 remediation |
 | Rehearsals | ≥2 mock conversions with timed runbook | Cutover window sizing |
 
-### Phase 4 — Integration & Data Cutover
+### Phase 4: Integration & Data Cutover
 
 | Activity | Detail | Repo grounding |
 |---|---|---|
@@ -97,13 +97,13 @@ and whatever ABAP stays behind is fixed to pass ATC.
 | Order parallel run | Replay a production `ORDERS05` sample through `parse_idoc_to_order` → `process_order_batch`; compare with the ECC-created `VBAK/VBAP` and status `51/53` outcomes | `sample_idoc_segments` fixture in `tests/test_order_sync.py` |
 | **Parallel-run sign-off** | Business owners sign per object; any variance becomes a defect that must be fixed before go-live | [`pre-migration-checklist.md`](pre-migration-checklist.md) §4 Acceptance |
 
-### Phase 5 — Go-Live & Hypercare
+### Phase 5: Go-Live & Hypercare
 
 | Activity | Detail |
 |---|---|
 | Cutover | Final delta conversion, freeze, then switch integration endpoints; rollback plan = re-enable ECC RFC/IDoc ports |
 | Monitoring | API latency/error rates for the 3 services; queue depth and failed-message rate for `order_sync` (replaces BD87/WE02 monitoring of status 51); inventory status drift checks |
-| Hypercare (4–6 weeks) | Daily defect triage; equivalence tests rerun on production data snapshots |
+| Hypercare (4 to 6 weeks) | Daily defect triage; equivalence tests rerun on production data snapshots |
 | ECC decommission & archive | Retire `Z_INVENTORY_REPORT`, `Z_RFC_VENDOR_LOOKUP`, `Z_IDOC_ORDER_SYNC` (and the fallback copy once partners have moved). Archive ECC data (ILM / read-only legacy store) for audit retention, then shut down ECC. |
 
 ---
