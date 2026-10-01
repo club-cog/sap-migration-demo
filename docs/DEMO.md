@@ -9,7 +9,7 @@ Todos os dados são fictícios ("Rede Clínica Exemplo"). Nenhum código ou dado
 ## Antes da reunião
 
 - Repo indexado no DeepWiki e conectado ao Devin.
-- Playbook `docs/playbook-migracao-advpl.md` cadastrado no Devin (anotar o `playbook-<id>`).
+- Playbook `docs/playbook-migracao-advpl.md` cadastrado no Devin: `playbook-ae24170403e2493ea61eeed9f4af127e` (macro `!migrar_advpl`).
 - Abrir com antecedência uma sessão de backup já concluída (branch `drconsulta/protheus-demo-concluida`), para o caso
   da sessão ao vivo demorar.
 
@@ -38,7 +38,7 @@ Todos os dados são fictícios ("Rede Clínica Exemplo"). Nenhum código ou dado
 
 ## Cena 3 - Executar (sessão Devin, ~5 min + revisão)
 
-> Execute o plano usando @playbook:playbook-<id> e abra um PR com a tabela de rastreabilidade e o resultado da conciliação. Não corrija comportamentos do legado; liste-os para o negócio validar.
+> Execute o plano usando @playbook:playbook-ae24170403e2493ea61eeed9f4af127e e abra um PR com a tabela de rastreabilidade e o resultado da conciliação. Não corrija comportamentos do legado; liste-os para o negócio validar.
 
 **O que mostrar:**
 - Os testes de paridade passando com 100% de conciliação contra o Protheus.
