@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -27,6 +28,8 @@ from servicos.protheus import dtos, stod
 RAIZ = Path(__file__).resolve().parent.parent
 DIR_DADOS = RAIZ / "legacy" / "dados"
 DIR_REFERENCIA = RAIZ / "legacy" / "saidas_referencia"
+ARQUIVO_FERIADOS = RAIZ / "config" / "feriados.csv"
+ARQUIVOS_BASE = ("SZ1_atendimentos.csv", "SZ2_convenios.csv", "SZ3_tabela_precos.csv", "SZ4_regras_repasse.csv")
 SEPARADOR = ";"
 
 Linha = dict[str, str]
@@ -87,6 +90,46 @@ def carregar_base(diretorio: Path = DIR_DADOS) -> BaseProtheus:
     return BaseProtheus(atendimentos=atendimentos, convenios=convenios, precos=precos, regras_repasse=regras)
 
 
+def carregar_feriados(caminho: Path = ARQUIVO_FERIADOS) -> tuple[date, ...]:
+    """Feriados usados pelo `DataValida` (equivalente à tabela 63 do SX5), um por linha em AAAAMMDD."""
+    return tuple(sorted(stod(linha["data"]) for linha in ler_csv(caminho)))
+
+
+def carregar_historico_lotes(diretorio: Path) -> tuple[list[LoteFaturamento], list[ItemLote]]:
+    """SZ5/SZ6 já gravados em execuções anteriores (saída de `python -m servicos.competencia`)."""
+    lotes = [
+        LoteFaturamento(
+            lote=linha["Z5_LOTE"],
+            convenio=linha["Z5_CONVEN"],
+            competencia=linha["Z5_COMPET"],
+            data_envio=stod(linha["Z5_DTENVIO"]),
+            qtd_guias=int(linha["Z5_QTDGUIA"]),
+            valor_bruto=Decimal(linha["Z5_VLBRUTO"]),
+            valor_desconto=Decimal(linha["Z5_VLDESC"]),
+            valor_coparticipacao=Decimal(linha["Z5_VLCOPAR"]),
+            valor_faturado=Decimal(linha["Z5_VLFAT"]),
+            valor_glosa=Decimal(linha["Z5_VLGLOSA"]),
+        )
+        for linha in ler_csv(diretorio / LAYOUT_SZ5.arquivo)
+    ]
+    itens = [
+        ItemLote(
+            lote=linha["Z6_LOTE"],
+            numate=linha["Z6_NUMATE"],
+            guia=linha["Z6_GUIA"],
+            procedimento=linha["Z6_PROCED"],
+            valor_tabela=Decimal(linha["Z6_VLTAB"]),
+            valor_desconto=Decimal(linha["Z6_VLDESC"]),
+            valor_coparticipacao=Decimal(linha["Z6_VLCOPAR"]),
+            valor_faturado=Decimal(linha["Z6_VLFAT"]),
+            valor_glosa=Decimal(linha["Z6_VLGLOSA"]),
+            motivo_glosa=linha["Z6_MOTGLO"],
+        )
+        for linha in ler_csv(diretorio / LAYOUT_SZ6.arquivo)
+    ]
+    return lotes, itens
+
+
 def _valor(numero: Decimal) -> str:
     return f"{numero:.2f}"
 
@@ -105,6 +148,42 @@ class Layout(Generic[T]):
         linhas = [self.converter(registro) for registro in registros]
         return sorted(linhas, key=lambda linha: tuple(linha[campo] for campo in self.chave))
 
+
+LAYOUT_SZ1: Layout[Atendimento] = Layout(
+    tabela="SZ1",
+    arquivo="SZ1_atendimentos.csv",
+    colunas=(
+        "Z1_NUMATE",
+        "Z1_DATA",
+        "Z1_PACIENT",
+        "Z1_TIPO",
+        "Z1_CONVEN",
+        "Z1_PROCED",
+        "Z1_MEDICO",
+        "Z1_GUIA",
+        "Z1_AUTORIZ",
+        "Z1_STATUS",
+        "Z1_FORMPG",
+        "Z1_PARCELA",
+        "Z1_FATURA",
+    ),
+    chave=("Z1_NUMATE",),
+    converter=lambda r: {
+        "Z1_NUMATE": r.numate,
+        "Z1_DATA": dtos(r.data),
+        "Z1_PACIENT": r.paciente,
+        "Z1_TIPO": r.tipo,
+        "Z1_CONVEN": r.convenio,
+        "Z1_PROCED": r.procedimento,
+        "Z1_MEDICO": r.medico,
+        "Z1_GUIA": r.guia,
+        "Z1_AUTORIZ": r.autorizacao,
+        "Z1_STATUS": r.status,
+        "Z1_FORMPG": r.forma_pagamento,
+        "Z1_PARCELA": r.parcelas,
+        "Z1_FATURA": r.fatura,
+    },
+)
 
 LAYOUT_SZ5: Layout[LoteFaturamento] = Layout(
     tabela="SZ5",

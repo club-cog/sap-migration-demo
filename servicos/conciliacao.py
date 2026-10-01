@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import zip_longest
 from pathlib import Path
 
 from servicos.dados import DIR_REFERENCIA, Linha, ler_csv
@@ -44,22 +46,25 @@ def conciliar(
     with caminho.open(encoding="utf-8") as arquivo:
         cabecalho = arquivo.readline().strip().split(";")
 
-    def indexar(linhas: list[Linha]) -> dict[tuple[str, ...], Linha]:
-        return {tuple(linha[c] for c in chave): linha for linha in linhas}
+    def indexar(linhas: list[Linha]) -> dict[tuple[str, ...], list[Linha]]:
+        """Chave -> linhas na ordem do arquivo. Chaves repetidas são comparadas linha a linha."""
+        indice: dict[tuple[str, ...], list[Linha]] = defaultdict(list)
+        for linha in linhas:
+            indice[tuple(linha[c] for c in chave)].append(linha)
+        return indice
 
     por_chave_ref = indexar(referencia)
     por_chave_ger = indexar(geradas)
     divergencias: list[Divergencia] = []
     comparados = 0
     for k in sorted(por_chave_ref.keys() | por_chave_ger.keys()):
-        ref = por_chave_ref.get(k)
-        ger = por_chave_ger.get(k)
-        for campo in cabecalho:
-            comparados += 1
-            valor_ref = ref.get(campo) if ref else None
-            valor_ger = ger.get(campo) if ger else None
-            if valor_ref != valor_ger:
-                divergencias.append(Divergencia(chave=k, campo=campo, gerado=valor_ger, referencia=valor_ref))
+        for ref, ger in zip_longest(por_chave_ref.get(k, []), por_chave_ger.get(k, [])):
+            for campo in cabecalho:
+                comparados += 1
+                valor_ref = ref.get(campo) if ref else None
+                valor_ger = ger.get(campo) if ger else None
+                if valor_ref != valor_ger:
+                    divergencias.append(Divergencia(chave=k, campo=campo, gerado=valor_ger, referencia=valor_ref))
     return Conciliacao(
         tabela=tabela,
         colunas_iguais=list(colunas) == cabecalho,

@@ -32,3 +32,13 @@ pip install -r requirements.txt
 pytest            # na branch drconsulta/protheus-demo-concluida
 ruff check . && ruff format --check .
 ```
+
+## Serviços migrados
+
+```bash
+python -m servicos.competencia 202608 20260905 saidas/          # CSVs no layout do Protheus + conciliação
+ZAGEFIN_API_KEY=... uvicorn servicos.api:app   # servidor ASGI à escolha; POST /atendimentos/{numate}/titulos-receber (header X-API-Key)
+```
+
+Feriados do `DataValida` (equivalente ao SX5/63): `config/feriados.csv` (nacionais 2026; incluir os municipais/estaduais
+de cada unidade). A API aceita outro arquivo em `ZAGEFIN_FERIADOS`.
