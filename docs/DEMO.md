@@ -10,7 +10,7 @@ Todos os dados são fictícios ("Rede Clínica Exemplo"). Nenhum código ou dado
 
 - Repo indexado no DeepWiki e conectado ao Devin.
 - Playbook `docs/playbook-migracao-advpl.md` cadastrado no Devin (anotar o `playbook-<id>`).
-- Abrir com antecedência uma sessão de backup já concluída (branch `demo/migracao-concluida`), para o caso
+- Abrir com antecedência uma sessão de backup já concluída (branch `drconsulta/protheus-demo-concluida`), para o caso
   da sessão ao vivo demorar.
 
 ## Cena 1 - Entender o legado (Ask Devin, ~3 min)
