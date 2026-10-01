@@ -23,12 +23,12 @@ docs/
   playbook-migracao-advpl.md playbook reutilizável de migração
 ```
 
-A branch `demo/migracao-concluida` tem a migração pronta (`servicos/` + `tests/`), como backup da demo ao vivo.
+A branch `drconsulta/protheus-demo-concluida` tem a migração pronta (`servicos/` + `tests/`), como backup da demo ao vivo.
 
 ## Rodar
 
 ```bash
 pip install -r requirements.txt
-pytest            # na branch demo/migracao-concluida
+pytest            # na branch drconsulta/protheus-demo-concluida
 ruff check . && ruff format --check .
 ```
