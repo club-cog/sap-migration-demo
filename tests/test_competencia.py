@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import shutil
+import sys
 from datetime import date
+from pathlib import Path
 
-from servicos.competencia import SaidasCompetencia, marcar_faturados, processar_competencia
-from servicos.dados import carregar_feriados
+import pytest
+
+from servicos.competencia import SaidasCompetencia, main, marcar_faturados, processar_competencia
+from servicos.dados import DIR_DADOS, LAYOUT_SZ5, LAYOUT_SZ6, carregar_feriados, ler_csv
 from servicos.modelos import BaseProtheus
 from tests.conftest import COMPETENCIA, DATA_ENVIO
 
@@ -45,3 +50,32 @@ def test_feriados_configurados_mantem_paridade(base_protheus: BaseProtheus, said
     com_feriados = processar_competencia(base_protheus, COMPETENCIA, DATA_ENVIO, carregar_feriados())
 
     assert com_feriados == saidas
+
+
+def _rodar_cli(monkeypatch: pytest.MonkeyPatch, args: list[str]) -> None:
+    monkeypatch.setattr(sys, "argv", ["servicos.competencia", *args])
+    main()
+
+
+def test_reprocessamento_no_mesmo_diretorio_preserva_lotes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reprocessar com --historico apontando para a saída não apaga o SZ5/SZ6 já gravado."""
+    saida = tmp_path / "saidas"
+    _rodar_cli(monkeypatch, [COMPETENCIA, "20260905", str(saida)])
+    lotes = (saida / LAYOUT_SZ5.arquivo).read_text(encoding="utf-8")
+    itens = (saida / LAYOUT_SZ6.arquivo).read_text(encoding="utf-8")
+
+    dados = tmp_path / "dados"
+    dados.mkdir()
+    shutil.copy(saida / "SZ1_atendimentos.csv", dados)
+    for arquivo in ("SZ2_convenios.csv", "SZ3_tabela_precos.csv", "SZ4_regras_repasse.csv"):
+        shutil.copy(DIR_DADOS / arquivo, dados)
+
+    _rodar_cli(
+        monkeypatch,
+        [COMPETENCIA, "20260905", str(saida), "--dados", str(dados), "--historico", str(saida)],
+    )
+
+    assert (saida / LAYOUT_SZ5.arquivo).read_text(encoding="utf-8") == lotes
+    assert (saida / LAYOUT_SZ6.arquivo).read_text(encoding="utf-8") == itens
+    linhas = ler_csv(saida / LAYOUT_SZ5.arquivo)
+    assert {linha["Z5_LOTE"] for linha in linhas} == {"000001", "000002", "000003"}

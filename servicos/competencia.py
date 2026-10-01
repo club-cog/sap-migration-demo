@@ -3,8 +3,8 @@
 Uso: python -m servicos.competencia 202608 20260905 [diretorio_saida]
      [--dados DIR] [--historico DIR] [--feriados ARQUIVO]
 
-A saída inclui o SZ1 com Z1_FATURA preenchido. Para reprocessar, use esse SZ1 em `--dados` e a saída
-anterior em `--historico` (SZ5/SZ6 já gravados), como no banco do Protheus.
+A saída inclui o SZ1 com Z1_FATURA preenchido e o SZ5/SZ6 acumulado (histórico + novos), como no
+banco do Protheus. Para reprocessar, use esse SZ1 em `--dados` e a saída anterior em `--historico`.
 """
 
 from __future__ import annotations
@@ -167,8 +167,14 @@ def main() -> None:
         lotes_anteriores,
         itens_anteriores,
     )
+    # SZ5/SZ6 são tabelas acumuladas: o arquivo gravado junta o histórico com os lotes novos,
+    # como no Protheus. A conciliação continua comparando só o que esta execução gerou.
+    acumulado = {
+        LAYOUT_SZ5.arquivo: LAYOUT_SZ5.linhas([*lotes_anteriores, *saidas.lotes]),
+        LAYOUT_SZ6.arquivo: LAYOUT_SZ6.linhas([*itens_anteriores, *saidas.itens_lote]),
+    }
     for colunas, _, arquivo, linhas in saidas.tabelas().values():
-        gravar_csv(args.saida / arquivo, colunas, linhas)
+        gravar_csv(args.saida / arquivo, colunas, acumulado.get(arquivo, linhas))
     atualizada = marcar_faturados(base, saidas.faturados)
     gravar_csv(args.saida / LAYOUT_SZ1.arquivo, LAYOUT_SZ1.colunas, LAYOUT_SZ1.linhas(atualizada.atendimentos))
 
