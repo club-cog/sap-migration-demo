@@ -37,8 +37,12 @@ public class ExtratoHandler implements HttpHandler {
             responder(ex, 401, "{\"erro\":\"nao autenticado\"}");
             return;
         }
-        LOG.info("Extrato solicitado por cpf=" + cpf + " conta=" + q.get("conta"));
         try {
+            if (!pertenceAoCliente(cpf, q.get("agencia"), q.get("conta"))) {
+                LOG.warning("Acesso negado a conta de outro cliente. cpf=" + TokenService.mascarar(cpf));
+                responder(ex, 403, "{\"erro\":\"acesso negado\"}");
+                return;
+            }
             List<Lancamento> itens = repo.buscarExtrato(q.get("agencia"), q.get("conta"), q.get("inicio"), q.get("fim"));
             StringBuilder json = new StringBuilder("[");
             for (int i = 0; i < itens.size(); i++) {
@@ -51,8 +55,14 @@ public class ExtratoHandler implements HttpHandler {
             }
             responder(ex, 200, json.append(']').toString());
         } catch (Exception e) {
-            responder(ex, 500, "{\"erro\":\"" + e.getMessage() + "\"}");
+            LOG.log(java.util.logging.Level.SEVERE, "Erro ao consultar extrato", e);
+            responder(ex, 500, "{\"erro\":\"erro interno\"}");
         }
+    }
+
+    boolean pertenceAoCliente(String cpf, String agencia, String conta) throws Exception {
+        String contaDoCliente = repo.buscarContaDoCliente(cpf);
+        return contaDoCliente != null && contaDoCliente.equals(agencia + "-" + conta);
     }
 
     static Map<String, String> parametros(String query) {
