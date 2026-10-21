@@ -1,0 +1,52 @@
+;; ============================================================================
+;; rounding.quill -- shared rounding helpers for RiskDB models
+;; author: rkessler 2009          last change: 2012 (dpatel)
+;; ALL money/rate rounding goes thru here. do not call ROUND in models (RSK-0412)
+;; ============================================================================
+
+cell MONEY_DP = 2
+cell RATE_DP = 6
+
+;; money: 2dp half-up (away from zero)
+defn money(x)
+  return ROUND(x, MONEY_DP)
+enddefn
+
+;; ratios / factors: 6dp half-up
+defn rate(x)
+  return ROUND(x, RATE_DP)
+enddefn
+
+;; round to nearest whole unit, half-up. CSA delivery/return amounts
+defn to_unit(x, unit)
+  if unit <= 0 then
+    return money(x)
+  endif
+  return ROUND(x / unit, 0) * unit
+enddefn
+
+;; unit rounding for eod batch v1 (pre-2012 CSA engine)
+defn to_unit_v1(x, unit)
+  if unit <= 0 then
+    return money(x)
+  endif
+  return TRUNC(x / unit, 0) * unit
+enddefn
+
+defn floor_at(x, lo)
+  if x < lo then
+    return lo
+  endif
+  return x
+enddefn
+
+defn cap_at(x, hi)
+  if x > hi then
+    return hi
+  endif
+  return x
+enddefn
+
+defn clamp(x, lo, hi)
+  return cap_at(floor_at(x, lo), hi)
+enddefn

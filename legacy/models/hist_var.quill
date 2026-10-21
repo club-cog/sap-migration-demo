@@ -1,0 +1,66 @@
+;; ============================================================================
+;; hist_var.quill -- 1d / 10d historical simulation VaR
+;; author: tnakamura 2011         last change: 2014 (tnakamura)
+;; ref: MKR-VAR-01. 250d window, equal weights, sqrt-10 scaling
+;; used by: expected_shortfall (pnl_series)
+;; ============================================================================
+
+use "lib/stats.quill" as st
+use "lib/rounding.quill" as rnd
+
+cell HIST_TBL = TABLE.LOAD("market_history.csv")
+cell EXPO_TBL = TABLE.LOAD("var_exposures.csv")
+cell WINDOW = 250
+cell MIN_OBS = 200
+cell SCALE_10D = SQRT(10)
+
+;; pnl per day = sum(exposure * factor return). returns last <=n obs ending at as_of
+defn pnl_series(portfolio, as_of, n)
+  let expo = TABLE.WHERE(EXPO_TBL, "portfolio", portfolio)
+  if LEN(expo) == 0 then
+    ERROR("no exposures for " & portfolio)
+  endif
+  let rows = []
+  for r in TABLE.ROWS(HIST_TBL) do
+    if r.date <= as_of then
+      APPEND(rows, r)
+    endif
+  endfor
+  let first = MAX(LEN(rows) - n + 1, 1)
+  let out = []
+  for i = first to LEN(rows) do
+    let p = 0
+    for e in expo do
+      set p = p + e.exposure * GET(rows[i], e.factor)
+    endfor
+    APPEND(out, {date: rows[i].date, pnl: p})
+  endfor
+  return out
+enddefn
+
+defn pnl_values(series)
+  let v = []
+  for s in series do
+    APPEND(v, s.pnl)
+  endfor
+  return v
+enddefn
+
+defn run(case)
+  let as_of = DATE.PARSE(case.as_of)
+  let conf = NUM(case.confidence)
+  let ser = pnl_series(case.portfolio, as_of, WINDOW)
+  let n = LEN(ser)
+  if n < MIN_OBS then
+    return {n_obs: n, var_1d: nil, var_10d: nil, worst_loss: nil, worst_date: nil, status: "INSUFFICIENT"}
+  endif
+  let worst = ser[1]
+  for s in ser do
+    if s.pnl < worst.pnl then
+      set worst = s
+    endif
+  endfor
+  ;; VaR floored at 0 (long-only books can show negative quantile) MRM-2012-31
+  let v1 = MAX(st.quantile_loss(pnl_values(ser), conf), 0)
+  return {n_obs: n, var_1d: rnd.money(v1), var_10d: rnd.money(v1 * SCALE_10D), worst_loss: rnd.money(-worst.pnl), worst_date: worst.date, status: "OK"}
+enddefn

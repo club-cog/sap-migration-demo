@@ -1,0 +1,54 @@
+;; ============================================================================
+;; cva_simple.quill -- unilateral CVA, discrete EE profile
+;; author: sliang 2012            last change: 2015 (lbaptiste)
+;; ref: XVA-02. flat disc curve. spread: cds if quoted else rating proxy
+;; ============================================================================
+
+use "lib/rounding.quill" as rnd
+
+cell CP_TBL = TABLE.LOAD("counterparties.csv")
+cell PROXY_TBL = TABLE.LOAD("rating_spreads.csv")
+cell EE_TBL = TABLE.LOAD("cva_exposures.csv")
+cell DEFAULT_RR = 0.40
+cell DISC_RATE = 0.04
+cell SPREAD_FLOOR_BP = 10
+;; EM uplift on proxy spreads, XVA committee 2014-03. not applied to quoted cds
+cell EM_UPLIFT = 1.10
+
+defn spread_bp(cp)
+  if not ISNIL(cp.cds_bp) then
+    return {bp: MAX(cp.cds_bp, SPREAD_FLOOR_BP), src: "CDS"}
+  endif
+  let s = TABLE.LOOKUP(PROXY_TBL, "spread_bp", cp.rating, cp.sector)
+  if cp.region == "EM" then
+    set s = s * EM_UPLIFT
+  endif
+  return {bp: MAX(s, SPREAD_FLOOR_BP), src: "PROXY"}
+enddefn
+
+defn run(case)
+  let cp = TABLE.WHERE(CP_TBL, "cpty_id", case.cpty_id)[1]
+  let rr = cp.recovery
+  if ISNIL(rr) then
+    set rr = DEFAULT_RR
+  endif
+  let lgd = 1 - rr
+  let sp = spread_bp(cp)
+  let s = sp.bp / 10000
+  let prof = TABLE.WHERE(EE_TBL, "as_of", DATE.PARSE(case.as_of), "cpty_id", case.cpty_id)
+  let t0 = 0
+  let ee0 = prof[1].ee
+  let df0 = 1
+  let cva = 0
+  let peak = 0
+  for p in prof do
+    let df = EXP(-DISC_RATE * p.tenor_years)
+    let pd = MAX(EXP(-s * t0 / lgd) - EXP(-s * p.tenor_years / lgd), 0)
+    set cva = cva + pd * (ee0 * df0 + p.ee * df) / 2
+    set peak = MAX(peak, p.ee)
+    set t0 = p.tenor_years
+    set ee0 = p.ee
+    set df0 = df
+  endfor
+  return {spread_bp: rnd.rate(sp.bp), spread_src: sp.src, lgd: lgd, peak_ee: peak, cva: rnd.money(lgd * cva)}
+enddefn

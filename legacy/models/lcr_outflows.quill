@@ -1,0 +1,78 @@
+;; ============================================================================
+;; lcr_outflows.quill -- LCR: stressed 30d net cash outflows and ratio
+;; author: rkessler 2010          last change: 2014 (dpatel)
+;; ref: liquidity policy LP-07 s.4-5. internal buffer per ALCO 2013-06
+;; ============================================================================
+
+use "hqla_haircut.quill" as hq
+use "lib/rounding.quill" as rnd
+
+cell RUNOFF_TBL = TABLE.LOAD("lcr_runoff.csv")
+cell FUND_TBL = TABLE.LOAD("funding.csv")
+cell INFL_TBL = TABLE.LOAD("lcr_inflows.csv")
+cell HORIZON_D = 30
+cell INFLOW_CAP = 0.75
+cell LCR_MIN = 1.00
+cell LCR_BUFFER = 1.10
+;; inflow rates. hardcoded since 2010, never moved to table
+cell INFLOW_RATE = {RETAIL_LOANS: 0.50, FI_LOANS: 1.00, SEC_LENDING_L1: 0, SEC_LENDING_OTHER: 0.50}
+;; stress haircut: extra haircut pts on HQLA when scenario flag on (ALCO 2013-06)
+cell STRESS_HC = {L1: 0, L2A: 0.10, L2B: 0.20}
+
+;; in 30d window? nil maturity = non-maturity deposit, always in
+defn in_window(mat, as_of)
+  if ISNIL(mat) then
+    return true
+  endif
+  return mat > as_of and mat <= DATE.ADD(as_of, HORIZON_D, "D")
+enddefn
+
+defn outflows(as_of, entity, stressed)
+  let tot = 0
+  for f in TABLE.WHERE(FUND_TBL, "entity", entity) do
+    if in_window(f.maturity_date, as_of) then
+      let r = TABLE.LOOKUP(RUNOFF_TBL, "runoff", f.category)
+      if ISNIL(r) then
+        ERROR("no runoff for " & f.category)
+      endif
+      if stressed then
+        set r = r + TABLE.LOOKUP(RUNOFF_TBL, "stress_runoff_addon", f.category)
+      endif
+      set tot = tot + hq.to_usd(f.balance, f.ccy) * MIN(r, 1)
+    endif
+  endfor
+  return tot
+enddefn
+
+defn inflows(as_of, entity)
+  let tot = 0
+  for i in TABLE.WHERE(INFL_TBL, "entity", entity) do
+    ;; open maturity inflows not counted (LP-07 5.2)
+    if not ISNIL(i.maturity_date) and in_window(i.maturity_date, as_of) then
+      set tot = tot + hq.to_usd(i.balance, i.ccy) * INFLOW_RATE[i.category]
+    endif
+  endfor
+  return tot
+enddefn
+
+defn run(case)
+  let as_of = DATE.PARSE(case.as_of)
+  let stressed = case.stress_flag == "Y"
+  let addon = hq.NO_ADDON
+  if stressed then
+    set addon = STRESS_HC
+  endif
+  let stock = hq.hqla_stock(as_of, case.entity, addon)
+  let gross = rnd.money(outflows(as_of, case.entity, stressed))
+  let infl = rnd.money(inflows(as_of, case.entity))
+  let capped = MIN(infl, rnd.money(INFLOW_CAP * gross))
+  let net = gross - capped
+  let lcr = rnd.rate(stock.hqla / net)
+  let status = "GREEN"
+  if lcr < LCR_MIN then
+    set status = "RED"
+  elif lcr < LCR_BUFFER then
+    set status = "AMBER"
+  endif
+  return {hqla: stock.hqla, gross_outflows: gross, inflows: infl, capped_inflows: capped, net_outflows: net, lcr: lcr, status: status}
+enddefn

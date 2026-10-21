@@ -1,0 +1,69 @@
+;; ============================================================================
+;; collateral_margin_call.quill -- daily variation margin call per CSA
+;; author: rkessler 2011          last change: 2014 (dpatel)
+;; ref: COLL-OPS-04. exposure +ve = cpty owes us. IA not subject to threshold
+;; ============================================================================
+
+use "lib/rounding.quill" as rnd
+
+cell CSA_TBL = TABLE.LOAD("csa_agreements.csv")
+cell MTM_TBL = TABLE.LOAD("margin_mtm.csv")
+cell HC_TBL = TABLE.LOAD("csa_haircuts.csv")
+
+defn load_csa(id)
+  let rows = TABLE.WHERE(CSA_TBL, "csa_id", id)
+  if LEN(rows) == 0 then
+    ERROR("unknown csa " & id)
+  endif
+  return rows[1]
+enddefn
+
+;; raw (unrounded) call for a fixing date
+defn calc(csa, fix_dt)
+  let m = TABLE.WHERE(MTM_TBL, "date", fix_dt, "csa_id", csa.csa_id)
+  if LEN(m) == 0 then
+    ERROR("no fixing " & fix_dt & " " & csa.csa_id)
+  endif
+  let r = m[1]
+  let hc = TABLE.LOOKUP(HC_TBL, "haircut", r.coll_type)
+  let req = MAX(r.exposure - csa.threshold, 0) + csa.independent_amount
+  let held = r.coll_mv * (1 - hc)
+  return {exposure: r.exposure, required: rnd.money(req), held: rnd.money(held), diff: rnd.money(req - held)}
+enddefn
+
+;; MTA test, direction, return capped at held
+defn call_of(c, csa)
+  if ABS(c.diff) < csa.mta then
+    return {typ: "NONE", amt: 0}
+  endif
+  if c.diff > 0 then
+    return {typ: "DELIVERY", amt: c.diff}
+  endif
+  return {typ: "RETURN", amt: MIN(-c.diff, c.held)}
+enddefn
+
+defn result(fix_dt, c, cl, amt)
+  return {fixing_date: fix_dt, exposure: c.exposure, required: c.required, held_post_hc: c.held, raw_diff: c.diff, call_type: cl.typ, call_amount: amt}
+enddefn
+
+;; wknd run: no sat/sun fixing, use prior fri close (COLL-OPS-04 2.3)
+;; path kept from eod batch v1 (rkessler 2011)
+defn wknd_call(as_of, csa)
+  let fix_dt = DATE.ROLL(as_of, "P")
+  let c = calc(csa, fix_dt)
+  let cl = call_of(c, csa)
+  let amt = rnd.to_unit_v1(cl.amt, csa.rounding_unit)
+  return result(fix_dt, c, cl, amt)
+enddefn
+
+defn run(case)
+  let as_of = DATE.PARSE(case.as_of)
+  let csa = load_csa(case.csa_id)
+  if DATE.DOW(as_of) >= 6 then
+    return wknd_call(as_of, csa)
+  endif
+  let c = calc(csa, as_of)
+  let cl = call_of(c, csa)
+  let amt = rnd.to_unit(cl.amt, csa.rounding_unit)
+  return result(as_of, c, cl, amt)
+enddefn

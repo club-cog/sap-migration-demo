@@ -1,0 +1,66 @@
+;; ============================================================================
+;; stress_shock.quill -- scenario shocks on trading book positions
+;; author: jwong 2010             last change: 2013 (jwong)
+;; ref: ST-01 scenario library. REL = % of mv, BP = pv01 * bp
+;; ============================================================================
+
+use "lib/rounding.quill" as rnd
+
+cell POS_TBL = TABLE.LOAD("trading_positions.csv")
+cell SCN_TBL = TABLE.LOAD("stress_scenarios.csv")
+;; book loss limits (USD), RMC 2013-Q2
+cell LIMITS = {"EQ-CASH": 60000000, "CREDIT-FLOW": 40000000, "EM-MACRO": 55000000}
+cell WARN_UTIL = 0.80
+cell CONC_PCT = 0.40
+;; HY spread shocks scaled up for jump risk (ST-01 annex B)
+cell HY_MULT = 1.5
+
+defn pos_pnl(p, scn)
+  let typ = TABLE.LOOKUP(SCN_TBL, "shock_type", scn, p.asset_class, p.sub)
+  if ISNIL(typ) then
+    return nil
+  endif
+  let shk = TABLE.LOOKUP(SCN_TBL, "shock", scn, p.asset_class, p.sub)
+  if typ == "REL" then
+    ;; no shock beyond -100%
+    return p.mv * MAX(shk, -1)
+  endif
+  if p.asset_class == "CR" and p.sub == "HY" then
+    set shk = shk * HY_MULT
+  endif
+  return -p.pv01 * shk
+enddefn
+
+defn run(case)
+  let tot = 0
+  let n = 0
+  let n_shk = 0
+  let worst_id = ""
+  let worst = 0
+  for p in TABLE.WHERE(POS_TBL, "as_of", DATE.PARSE(case.as_of), "book", case.book) do
+    set n = n + 1
+    let x = pos_pnl(p, case.scenario)
+    if not ISNIL(x) then
+      set n_shk = n_shk + 1
+      set tot = tot + x
+      if x < worst then
+        set worst = x
+        set worst_id = p.pos_id
+      endif
+    endif
+  endfor
+  let loss = MAX(-tot, 0)
+  let lim = LIMITS[case.book]
+  let util = rnd.rate(loss / lim)
+  let status = "OK"
+  if util >= 1 then
+    set status = "BREACH"
+  elif util >= WARN_UTIL then
+    set status = "WARN"
+  endif
+  let conc = false
+  if loss > 0 then
+    set conc = -worst > CONC_PCT * loss
+  endif
+  return {n_pos: n, n_shocked: n_shk, pnl: rnd.money(tot), worst_pos: worst_id, worst_pnl: rnd.money(worst), limit: lim, utilization: util, status: status, concentrated: conc}
+enddefn

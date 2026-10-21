@@ -1,0 +1,10 @@
+rating,sector,spread_bp
+AAA,*,25
+AA,FUND,45
+AA,*,55
+A,FI,95
+A,*,110
+BBB,*,175
+BB,*,340
+B,*,610
+*,*,900

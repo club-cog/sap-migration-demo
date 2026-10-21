@@ -1,0 +1,54 @@
+;; ============================================================================
+;; nsfr.quill -- net stable funding ratio (ASF / RSF)
+;; author: mfournier 2013         last change: 2015 (mfournier)
+;; ref: liquidity policy LP-07 s.8. buckets from daycount lib
+;; ============================================================================
+
+use "lib/daycount.quill" as dc
+use "lib/rounding.quill" as rnd
+
+cell BS_TBL = TABLE.LOAD("nsfr_balance_sheet.csv")
+cell FACT_TBL = TABLE.LOAD("nsfr_factors.csv")
+cell NSFR_MIN = 1.00
+cell NSFR_BUFFER = 1.05
+
+defn factor(side, cat, bucket)
+  let f = TABLE.LOOKUP(FACT_TBL, "factor", side, cat, bucket)
+  if ISNIL(f) then
+    ERROR("no nsfr factor " & side & "/" & cat & "/" & bucket)
+  endif
+  return f
+enddefn
+
+defn run(case)
+  let as_of = DATE.PARSE(case.as_of)
+  let asf = 0
+  let rsf = 0
+  let n = 0
+  for ln in TABLE.WHERE(BS_TBL, "entity", case.entity) do
+    let live = true
+    if not ISNIL(ln.maturity_date) then
+      set live = ln.maturity_date > as_of
+    endif
+    if live then
+      let b = dc.mat_bucket(as_of, ln.maturity_date)
+      let w = ln.amount_usd * factor(ln.side, ln.category, b)
+      if ln.side == "ASF" then
+        set asf = asf + w
+      else
+        set rsf = rsf + w
+      endif
+      set n = n + 1
+    endif
+  endfor
+  set asf = rnd.money(asf)
+  set rsf = rnd.money(rsf)
+  let ratio = rnd.rate(asf / rsf)
+  let status = "GREEN"
+  if ratio < NSFR_MIN then
+    set status = "RED"
+  elif ratio < NSFR_BUFFER then
+    set status = "AMBER"
+  endif
+  return {n_lines: n, asf: asf, rsf: rsf, nsfr: ratio, status: status}
+enddefn

@@ -1,0 +1,38 @@
+;; ============================================================================
+;; stats.quill -- tail statistics for hist sim models
+;; author: tnakamura 2011         last change: 2014 (tnakamura)
+;; losses are positive numbers. pnl lists are 1-indexed like everything else
+;; ============================================================================
+
+;; losses sorted worst first
+defn losses_desc(pnl)
+  let ls = []
+  for p in pnl do
+    APPEND(ls, -p)
+  endfor
+  return SORT(ls, "DESC")
+enddefn
+
+;; VaR: k-th worst loss, k = ceil(n*(1-conf)). no interpolation (per MRM 2011)
+defn quantile_loss(pnl, conf)
+  let ls = losses_desc(pnl)
+  let k = CEIL(LEN(ls) * (1 - conf))
+  if k < 1 then
+    set k = 1
+  endif
+  return ls[k]
+enddefn
+
+;; ES: mean of worst k, k = floor(n*(1-conf)), min 1
+defn tail_mean(pnl, conf)
+  let ls = losses_desc(pnl)
+  let k = FLOOR(LEN(ls) * (1 - conf))
+  if k < 1 then
+    set k = 1
+  endif
+  let t = 0
+  for i = 1 to k do
+    set t = t + ls[i]
+  endfor
+  return t / k
+enddefn
