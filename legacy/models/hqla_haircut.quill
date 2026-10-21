@@ -1,0 +1,74 @@
+;; ============================================================================
+;; hqla_haircut.quill -- HQLA stock after haircuts and level 2 caps
+;; author: rkessler 2009          last change: 2014 (dpatel)
+;; ref: liquidity policy LP-07 s.3, RM memo 2009-114
+;; used by: lcr_outflows (hqla_stock). DO NOT change signature w/o lcr owner
+;; ============================================================================
+
+use "lib/rounding.quill" as rnd
+
+cell HC_TBL = TABLE.LOAD("hqla_haircuts.csv")
+cell POS_TBL = TABLE.LOAD("positions.csv")
+cell FX_TBL = TABLE.LOAD("fx_rates.csv")
+cell HOME_CCY = {"EXB-NY": "USD", "EXB-LDN": "GBP", "EXB-SGP": "SGD"}
+cell NO_ADDON = {L1: 0, L2A: 0, L2B: 0}
+cell L2B_CAP = 0.15
+cell L2_CAP = 0.40
+
+defn to_usd(amt, ccy)
+  let r = TABLE.LOOKUP(FX_TBL, "usd_rate", ccy)
+  if ISNIL(r) then
+    ERROR("no fx rate for " & ccy)
+  endif
+  return amt * r
+enddefn
+
+;; level + haircut for one position. table is first-match, wildcard "*"
+defn classify(p, entity)
+  let lvl = TABLE.LOOKUP(HC_TBL, "level", p.asset_class, p.rating)
+  let hc = TABLE.LOOKUP(HC_TBL, "haircut", p.asset_class, p.rating)
+  ;; foreign ccy sovereign (non AAA) only counts as L2A. LP-07 3.4(b)
+  if lvl == "L1" and p.asset_class == "SOV" and p.ccy != HOME_CCY[entity] and p.rating != "AAA" then
+    set lvl = "L2A"
+    set hc = 0.15
+  endif
+  return {level: lvl, haircut: hc}
+enddefn
+
+defn eligible(p, as_of)
+  if p.encumbered == "Y" then
+    return false
+  endif
+  if not ISNIL(p.maturity_date) then
+    if p.maturity_date <= as_of then
+      return false
+    endif
+  endif
+  return true
+enddefn
+
+;; returns stock record. addon = extra haircut pts by level (lcr stress uses this)
+defn hqla_stock(as_of, entity, addon)
+  let lv = {L1: 0, L2A: 0, L2B: 0}
+  let n_ok = 0
+  let n_x = 0
+  for p in TABLE.WHERE(POS_TBL, "entity", entity) do
+    let c = classify(p, entity)
+    if not eligible(p, as_of) or c.level == "NONE" then
+      set n_x = n_x + 1
+    else
+      let hc = MIN(c.haircut + addon[c.level], 1)
+      set lv[c.level] = lv[c.level] + to_usd(p.market_value, p.ccy) * (1 - hc)
+      set n_ok = n_ok + 1
+    endif
+  endfor
+  ;; caps: L2B <= 15%, L2 <= 40% of stock. adjusted-amount method LP-07 3.6
+  let adj15 = MAX(lv.L2B - L2B_CAP / (1 - L2B_CAP) * (lv.L1 + lv.L2A), 0)
+  let adj40 = MAX(lv.L2A + lv.L2B - adj15 - L2_CAP / (1 - L2_CAP) * lv.L1, 0)
+  let total = lv.L1 + lv.L2A + lv.L2B - adj15 - adj40
+  return {n_eligible: n_ok, n_excluded: n_x, l1: rnd.money(lv.L1), l2a: rnd.money(lv.L2A), l2b: rnd.money(lv.L2B), adj_15: rnd.money(adj15), adj_40: rnd.money(adj40), hqla: rnd.money(total)}
+enddefn
+
+defn run(case)
+  return hqla_stock(DATE.PARSE(case.as_of), case.entity, NO_ADDON)
+enddefn

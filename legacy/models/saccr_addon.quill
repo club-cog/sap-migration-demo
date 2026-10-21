@@ -1,0 +1,84 @@
+;; ============================================================================
+;; saccr_addon.quill -- SA-CCR add-on, PFE multiplier and EAD (unmargined)
+;; author: lbaptiste 2015         last change: 2016 (lbaptiste)
+;; ref: CCR-SA-03. IR + FX only. options/credit/equity out of scope (phase 2)
+;; ============================================================================
+
+use "lib/daycount.quill" as dc
+use "lib/rounding.quill" as rnd
+
+cell TRADE_TBL = TABLE.LOAD("trades_saccr.csv")
+cell NS_TBL = TABLE.LOAD("netting_sets.csv")
+cell ALPHA = 1.4
+cell SF_IR = 0.005
+cell SF_FX = 0.04
+cell FLOOR_M = 0.05
+cell MIN_MAT_Y = 10 / 250
+
+defn supervisory_duration(s, e)
+  return (EXP(-0.05 * s) - EXP(-0.05 * e)) / 0.05
+enddefn
+
+defn mat_factor(m)
+  return SQRT(MIN(MAX(m, MIN_MAT_Y), 1))
+enddefn
+
+defn ir_bucket(e)
+  if e < 1 then
+    return 1
+  elif e <= 5 then
+    return 2
+  endif
+  return 3
+enddefn
+
+defn run(case)
+  let as_of = DATE.PARSE(case.as_of)
+  let ns = case.netting_set
+  let coll = TABLE.LOOKUP(NS_TBL, "collateral_held", ns)
+  let ir = {}
+  let fx = {}
+  let v = 0
+  let n = 0
+  for t in TABLE.WHERE(TRADE_TBL, "netting_set", ns) do
+    if t.end_date > as_of then
+      let dlt = 1
+      if t.direction == "S" then
+        set dlt = -1
+      endif
+      let s = MAX(dc.yearfrac(as_of, t.start_date, "A365"), 0)
+      let e = dc.yearfrac(as_of, t.end_date, "A365")
+      let mf = mat_factor(e)
+      set v = v + t.mtm
+      set n = n + 1
+      if t.asset_class == "IR" then
+        if not HAS(ir, t.hedging_set) then
+          set ir[t.hedging_set] = [0, 0, 0]
+        endif
+        let k = ir_bucket(e)
+        set ir[t.hedging_set][k] = ir[t.hedging_set][k] + dlt * t.notional * supervisory_duration(s, e) * mf
+      else
+        set fx[t.hedging_set] = GET(fx, t.hedging_set, 0) + dlt * t.notional * mf
+      endif
+    endif
+  endfor
+  let add_ir = 0
+  for hs in ir do
+    let d = ir[hs]
+    let en2 = d[1] * d[1] + d[2] * d[2] + d[3] * d[3] + 1.4 * d[1] * d[2] + 1.4 * d[2] * d[3] + 0.6 * d[1] * d[3]
+    set add_ir = add_ir + SF_IR * SQRT(MAX(en2, 0))
+  endfor
+  let add_fx = 0
+  for hs in fx do
+    set add_fx = add_fx + SF_FX * ABS(fx[hs])
+  endfor
+  let addon = add_ir + add_fx
+  let vc = v - coll
+  let mult = 1
+  if addon > 0 then
+    set mult = MIN(1, FLOOR_M + (1 - FLOOR_M) * EXP(vc / (2 * (1 - FLOOR_M) * addon)))
+  endif
+  let rc = MAX(vc, 0)
+  let pfe = mult * addon
+  return {n_trades: n, addon_ir: rnd.money(add_ir), addon_fx: rnd.money(add_fx), addon: rnd.money(addon), multiplier: rnd.rate(mult), rc: rnd.money(rc), pfe: rnd.money(pfe), ead: rnd.money(ALPHA * (rc + pfe))}
+enddefn

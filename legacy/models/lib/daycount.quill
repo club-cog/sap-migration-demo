@@ -1,0 +1,48 @@
+;; ============================================================================
+;; daycount.quill -- day count + tenor helpers
+;; author: rkessler 2009          last change: 2013 (mfournier)
+;; basis codes: "A360" "A365" "30360"   (30360 = US bond basis, no EOM feb adj)
+;; ============================================================================
+
+cell DEFAULT_BASIS = "A365"
+
+defn yearfrac(d1, d2, basis)
+  if basis == "A360" then
+    return DATE.DIFF(d1, d2) / 360
+  elif basis == "A365" then
+    return DATE.DIFF(d1, d2) / 365
+  elif basis == "30360" then
+    let dd1 = MIN(DATE.DAY(d1), 30)
+    let dd2 = DATE.DAY(d2)
+    if dd1 == 30 then
+      set dd2 = MIN(dd2, 30)
+    endif
+    let y = DATE.YEAR(d2) - DATE.YEAR(d1)
+    let m = DATE.MONTH(d2) - DATE.MONTH(d1)
+    return (360 * y + 30 * m + (dd2 - dd1)) / 360
+  endif
+  ERROR("yearfrac: bad basis " & basis)
+enddefn
+
+;; residual maturity in yrs, floored at 0. nil mat = open ended -> 99
+defn years_to(as_of, mat)
+  if ISNIL(mat) then
+    return 99
+  endif
+  let yf = yearfrac(as_of, mat, DEFAULT_BASIS)
+  if yf < 0 then
+    return 0
+  endif
+  return yf
+enddefn
+
+;; NSFR style buckets. <6m / 6m-1y / >=1y
+defn mat_bucket(as_of, mat)
+  let y = years_to(as_of, mat)
+  if y < 0.5 then
+    return "LT6M"
+  elif y < 1 then
+    return "6M1Y"
+  endif
+  return "GE1Y"
+enddefn

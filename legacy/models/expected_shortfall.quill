@@ -1,0 +1,44 @@
+;; ============================================================================
+;; expected_shortfall.quill -- 97.5% ES, current vs stressed window
+;; author: tnakamura 2014         last change: 2016 (aokafor)
+;; ref: MKR-ES-01 interim method (pre full FRTB IMA). uses hist_var pnl
+;; ============================================================================
+
+use "hist_var.quill" as hv
+use "lib/stats.quill" as st
+use "lib/rounding.quill" as rnd
+
+cell ES_CONF = 0.975
+;; stress window fixed by MRM (2023 regional bank episode). do not roll
+cell STRESS_FROM = DATE.PARSE("2023-02-01")
+cell STRESS_TO = DATE.PARSE("2023-05-31")
+cell STRESS_W = 0.75
+
+defn stressed_pnl(portfolio)
+  let all = hv.pnl_series(portfolio, STRESS_TO, 400)
+  let v = []
+  for s in all do
+    if s.date >= STRESS_FROM then
+      APPEND(v, s.pnl)
+    endif
+  endfor
+  return v
+enddefn
+
+defn run(case)
+  let as_of = DATE.PARSE(case.as_of)
+  let ser = hv.pnl_series(case.portfolio, as_of, hv.WINDOW)
+  let n = LEN(ser)
+  if n < hv.MIN_OBS then
+    return {n_obs: n, es_1d: nil, es_stress_1d: nil, es_reported_1d: nil, es_10d: nil, binding: nil, status: "INSUFFICIENT"}
+  endif
+  let cur = st.tail_mean(hv.pnl_values(ser), ES_CONF)
+  let strs = st.tail_mean(stressed_pnl(case.portfolio), ES_CONF)
+  let rep = cur
+  let binding = "CURRENT"
+  if STRESS_W * strs > cur then
+    set rep = STRESS_W * strs
+    set binding = "STRESS"
+  endif
+  return {n_obs: n, es_1d: rnd.money(cur), es_stress_1d: rnd.money(strs), es_reported_1d: rnd.money(rep), es_10d: rnd.money(rep * hv.SCALE_10D), binding: binding, status: "OK"}
+enddefn

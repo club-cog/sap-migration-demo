@@ -1,0 +1,116 @@
+;; ============================================================================
+;; frtb_ir_delta.quill -- SA delta capital, GIRR (rates), per desk
+;; author: aokafor 2016           last change: 2016 (aokafor)
+;; ref: MKR-SA-02 draft v0.9. one bucket per ccy, single curve per ccy
+;; ============================================================================
+
+use "lib/rounding.quill" as rnd
+
+cell SENS_TBL = TABLE.LOAD("ir_sensitivities.csv")
+cell RW_TBL = TABLE.LOAD("frtb_ir_rw.csv")
+cell TENORS = [0.25, 0.5, 1, 2, 3, 5, 10, 15, 20, 30]
+cell THETA = 0.03
+cell RHO_FLOOR = 0.40
+cell GAMMA = 0.50
+;; "specified ccys" get rw / sqrt2. list frozen 2016, check w/ MRM before adding
+cell LIQUID_CCY = ["USD", "EUR", "GBP", "AUD", "JPY", "SEK", "CAD"]
+
+defn is_liquid(ccy)
+  for c in LIQUID_CCY do
+    if c == ccy then
+      return true
+    endif
+  endfor
+  return false
+enddefn
+
+defn rho(t1, t2)
+  return MAX(EXP(-THETA * ABS(t1 - t2) / MIN(t1, t2)), RHO_FLOOR)
+enddefn
+
+;; MED / HIGH / LOW correlation scenarios
+defn scen_corr(c, scen)
+  if scen == "HIGH" then
+    return MIN(c * 1.25, 1)
+  elif scen == "LOW" then
+    return MAX(2 * c - 1, 0.75 * c)
+  endif
+  return c
+enddefn
+
+;; weighted sens by ccy -> list of 10 (1-indexed, same order as TENORS)
+defn weighted(as_of, desk)
+  let ws = {}
+  for r in TABLE.WHERE(SENS_TBL, "as_of", as_of, "desk", desk) do
+    if not HAS(ws, r.ccy) then
+      set ws[r.ccy] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    endif
+    let rw = TABLE.LOOKUP(RW_TBL, "rw", r.tenor)
+    if is_liquid(r.ccy) then
+      set rw = rw / SQRT(2)
+    endif
+    for k = 1 to LEN(TENORS) do
+      if TENORS[k] == r.tenor then
+        set ws[r.ccy][k] = ws[r.ccy][k] + rw * r.sens
+      endif
+    endfor
+  endfor
+  return ws
+enddefn
+
+defn charge(ws, scen)
+  let kb = {}
+  let sb = {}
+  for ccy in ws do
+    let v = ws[ccy]
+    let acc = 0
+    for k = 1 to LEN(TENORS) do
+      for l = 1 to LEN(TENORS) do
+        if k == l then
+          set acc = acc + v[k] * v[k]
+        else
+          set acc = acc + scen_corr(rho(TENORS[k], TENORS[l]), scen) * v[k] * v[l]
+        endif
+      endfor
+    endfor
+    set kb[ccy] = SQRT(MAX(acc, 0))
+    set sb[ccy] = MAX(MIN(SUM(v), kb[ccy]), -kb[ccy])
+  endfor
+  let tot = 0
+  let g = scen_corr(GAMMA, scen)
+  for b in kb do
+    set tot = tot + kb[b] * kb[b]
+    for c in kb do
+      if b != c then
+        set tot = tot + g * sb[b] * sb[c]
+      endif
+    endfor
+  endfor
+  return {total: SQRT(MAX(tot, 0)), kb: kb}
+enddefn
+
+defn run(case)
+  let ws = weighted(DATE.PARSE(case.as_of), case.desk)
+  let lo = charge(ws, "LOW")
+  let md = charge(ws, "MED")
+  let hi = charge(ws, "HIGH")
+  let best = "MED"
+  let cap = md.total
+  if hi.total > cap then
+    set best = "HIGH"
+    set cap = hi.total
+  endif
+  if lo.total > cap then
+    set best = "LOW"
+    set cap = lo.total
+  endif
+  let top = ""
+  let topk = -1
+  for b in md.kb do
+    if md.kb[b] > topk then
+      set top = b
+      set topk = md.kb[b]
+    endif
+  endfor
+  return {n_buckets: LEN(ws), delta_low: rnd.money(lo.total), delta_med: rnd.money(md.total), delta_high: rnd.money(hi.total), delta_charge: rnd.money(cap), binding_scenario: best, top_bucket: top, top_bucket_kb: rnd.money(topk)}
+enddefn

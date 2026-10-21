@@ -1,0 +1,9 @@
+cpty_id,name,rating,sector,region,recovery,cds_bp
+CP-ORION,Orion Freight Holdings,A,CORP,NA,0.40,145
+CP-VEGA,Vega Mutual Fund,AA,FUND,EU,,62
+CP-ATLAS,Atlas Utilities Co,BBB,CORP,NA,,
+CP-NOVA,Nova Regional Bank,A,FI,EM,0.35,
+CP-LYRA,Lyra Pension Trust,AA,FUND,EU,,
+CP-RIGEL,Rigel Mining Plc,BB,CORP,EM,0.25,
+CP-SIRIUS,Sirius Sovereign Fund,AAA,SOV,EM,,4
+CP-CASTOR,Castor Insurance AG,A,FI,EU,,88

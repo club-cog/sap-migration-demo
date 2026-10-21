@@ -1,0 +1,5 @@
+netting_set,cpty_id,margined,collateral_held
+NS-ALPHA,CP-ORION,N,0
+NS-BRAVO,CP-VEGA,N,12500000
+NS-CHARLIE,CP-ATLAS,N,0
+NS-DELTA,CP-NOVA,N,4000000
